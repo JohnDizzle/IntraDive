@@ -1,3 +1,8 @@
+[id^="nativead-river"]
+[id^="nativead_"]
+[id^="ad_"]
+[id^="ads_"]
+[id^="ad-"]
 [id^="native_ad_nativead-river-"]
 #AC_ad
 #AD_160
