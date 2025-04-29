@@ -1,3 +1,4 @@
+[id^="native_ad_nativead"]
 #AC_ad
 #AD_160
 #AD_300
