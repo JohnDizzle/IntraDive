@@ -1,3 +1,4 @@
+[card-type="nativead"]
 [id^="nativead-river"]
 [id^="nativead_"]
 [id^="ad_"]
