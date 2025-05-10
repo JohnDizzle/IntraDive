@@ -1,4 +1,4 @@
-﻿if (!window.WebDiveAdBlockerInitialized) {
+if (!window.WebDiveAdBlockerInitialized) {
     window.WebDiveAdBlockerInitialized = true;
 
     window.WebDiveAdBlocker = (() => {
@@ -23,6 +23,10 @@
             '[id^="owaadbar"]',
             'ins.adsbygoogle',
             '[data-google-query-id]',
+            '.displayAdContainer',
+            '.displayAdCard',
+            '[id^="displayAdCard"]',
+            '[id^="displayAdContainer"]',
             'iframe[src*="googlesyndication.com"]', '[id*="advert"]', '[class*="advert"]', '[id*="sponsored"]', '[class*="sponsored"]',
             '[id$="nativead"]',
             '[id*="promo"]', '[class*="promo"]', '[id^="ad-"]', '[class^="ad-"]', '[id$="-ad"]', '[class$="-ad"]',
@@ -37,8 +41,15 @@
             const warnBuffer = [];
             const LOG_INTERVAL = 1000;
             const interval = setInterval(() => {
-                if (logBuffer.length) console.log('[AdBlock]', ...logBuffer.splice(0));
-                if (warnBuffer.length) console.warn('[AdBlock]', ...warnBuffer.splice(0));
+                let i = 0; 
+                if (logBuffer.length) {
+                    console.log('[AdBlock_WebDive]');
+                    logBuffer.splice(0).forEach(t => console.log(`${++i}: ${t}\n`));
+                }
+                if (warnBuffer.length) {
+                    console.warn('[AdBlock_WebDive]');
+                    warnBuffer.splice(0).forEach(t => console.warn(`${++i}: ${t}\n`));
+                }
             }, LOG_INTERVAL);
 
             return {
@@ -46,8 +57,14 @@
                 warn: (...args) => DEBUG && warnBuffer.push(...args),
                 flush: () => {
                     clearInterval(interval);
-                    if (logBuffer.length) console.log('[AdBlock]', ...logBuffer.splice(0));
-                    if (warnBuffer.length) console.warn('[AdBlock]', ...warnBuffer.splice(0));
+                    if (logBuffer.length) {
+                        console.log('[AdBlock_WebDive]');
+                        logBuffer.splice(0).forEach(t => console.log(`${++i}: ${t}\n`));
+                    }
+                    if (warnBuffer.length) {
+                        console.warn('[AdBlock_WebDive]');
+                        warnBuffer.splice(0).forEach(t => console.warn(`${++i}: ${t}\n`));
+                    }
                 }
             };
         })();
@@ -82,10 +99,14 @@
 
         const getElementSignature = el => {
             const tag = el.tagName.toLowerCase();
-            const id = el.id ? `#${el.id}` : '';
-            const cls = [...el.classList].slice(0, 3).map(c => `.${c}`).join('');
+            const id = el.id ? `#${CSS.escape(el.id)}` : ''; // Escape the id
+            const cls = [...el.classList]
+                .slice(0, 3) // Limit to the first 3 classes
+                .map(c => `.${CSS.escape(c)}`) // Escape each class
+                .join('');
             return `${tag}${id}${cls}`;
         };
+
 
         const removeElementAndAncestors = (el, depth = 5) => {
             if (!el || !(el instanceof Element)) return;
@@ -171,27 +192,55 @@
             return [...easy, ...fallbackSelectors];
         };
 
+        
         const cleanAds = (context, selectors) => {
             const removedSigs = new Set(loadJSON(SIGNATURES_KEY) || []);
+
             context.querySelectorAll('[ad], [aria-ad-label]').forEach(el => {
                 const sig = getElementSignature(el);
                 removeElementAndAncestors(el);
                 removedSigs.add(sig);
             });
+
+            const sanitizeSelector = (selector) => {
+                try {
+                    return CSS.escape(selector);
+                } catch (e) {
+                    return null;
+                }
+            };
+
+
             selectors.forEach(sel => {
-                if (sel === null) return;
-                if (sel == "") return;
-                safe(() => {
-                    context.querySelectorAll(sel).forEach(el => {
-                        const sig = getElementSignature(el);
-                        removeElementAndAncestors(el);
-                        removedSigs.add(sig);
-                    });
-                }, `selector error: ${sel}`)
+
+                if (!sel) return; // Skip null or empty selectors
+
+                if (sanitizeSelector(sel)) {
+                    safe(() => {
+                        context.querySelectorAll(sel).forEach(el => {
+                            const sig = getElementSignature(el);
+                            removeElementAndAncestors(el);
+                            removedSigs.add(sig);
+                        });
+                    }, `selector error: ${sel}`);
+                }
             });
+
             saveJSON(SIGNATURES_KEY, [...removedSigs]);
         };
 
+        const sanitizeSignaturesKey = () => {
+            const lastSanitized = loadJSON(LAST_SANITIZED_KEY);
+            const today = new Date().toISOString().split('T')[0]; // Get current date in YYYY-MM-DD format
+
+            if (lastSanitized !== today) {
+                DEBUG && Logger.log('Sanitizing SIGNATURES_KEY for a new visit today.');
+                localStorage.removeItem(SIGNATURES_KEY); // Clear the signatures for the site
+                saveJSON(LAST_SANITIZED_KEY, today); // Update the last sanitized date
+            } else {
+                DEBUG && Logger.log('SIGNATURES_KEY already sanitized today.');
+            }
+        };
 
         const fastCleanupFromCache = () => {
             const sigs = loadJSON(SIGNATURES_KEY);
@@ -245,18 +294,7 @@
             observedShadowRoots.clear();
         };
 
-        const sanitizeSignaturesKey = () => {
-            const lastSanitized = loadJSON(LAST_SANITIZED_KEY);
-            const today = new Date().toISOString().split('T')[0]; // Get current date in YYYY-MM-DD format
-
-            if (lastSanitized !== today) {
-                DEBUG && Logger.log('Sanitizing SIGNATURES_KEY for a new visit today.');
-                localStorage.removeItem(SIGNATURES_KEY); // Clear the signatures for the site
-                saveJSON(LAST_SANITIZED_KEY, today); // Update the last sanitized date
-            } else {
-                DEBUG && Logger.log('SIGNATURES_KEY already sanitized today.');
-            }
-        };
+        
 
         const run = async () => {
             // if cleanup force exit-> although you can remove the object (script) from window -> destroys it. 
