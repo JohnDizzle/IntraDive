@@ -16,10 +16,9 @@ if (!window.WebDiveAdBlockerInitialized) {
         const LAST_SANITIZED_KEY = `${STORAGE_PREFIX}LastSanitized_${HOSTNAME}`;
         const memoryCache = {};
         const observers = new Set();
-        const observedShadowRoots = new WeakSet();
+        const observedShadowRoots = new Set();
         let interval = null;
         let isCleanedUp = false;
-        let throttledScrollListener, debouncedCleanListener;
 
         const fallbackSelectors = [
             'iframe[id^="tm_ad_frame"]', 'iframe[id^="ad_"]', 'iframe[id^="google_ads"]', 'iframe[id^="google_ads_iframe"]',
@@ -32,6 +31,10 @@ if (!window.WebDiveAdBlockerInitialized) {
             '.displayAdCard',
             '[id^="displayAdCard"]',
             '[id^="displayAdContainer"]',
+            'cs-responsive-card[ad]',
+            'cs-responsive-card[id*="nativead"]',
+            '[id^="nativead-river-"]',
+            '.news-letter-container display',
             'cs-native-ad-card',
             'iframe[src*="googlesyndication.com"]', '[id*="advert"]', '[class*="advert"]', '[id*="sponsored"]', '[class*="sponsored"]',
             '[id$="nativead"]',
@@ -41,50 +44,37 @@ if (!window.WebDiveAdBlockerInitialized) {
             '.advertisement-unit', '.ad-unit', '.ad-container', '.ad-slot', '.ad-banner', '.ad-label-text'
         ];
 
-        // Logger with limited buffer
-        const MAX_LOG_BUFFER = 100;
+        // Logger
         const Logger = (() => {
             const logBuffer = [];
             const warnBuffer = [];
             const LOG_INTERVAL = 1000;
-            let logIndex = 0, warnIndex = 0;
             const interval = setInterval(() => {
-                logIndex = 0;
+                let i = 0; 
                 if (logBuffer.length) {
                     console.log('[AdBlock_WebDive]');
-                    logBuffer.splice(0).forEach(t => console.log(`${++logIndex}: ${t}\n`));
+                    logBuffer.splice(0).forEach(t => console.log(`${++i}: ${t}\n`));
                 }
-                warnIndex = 0;
                 if (warnBuffer.length) {
                     console.warn('[AdBlock_WebDive]');
-                    warnBuffer.splice(0).forEach(t => console.warn(`${++warnIndex}: ${t}\n`));
+                    warnBuffer.splice(0).forEach(t => console.warn(`${++i}: ${t}\n`));
                 }
             }, LOG_INTERVAL);
 
             return {
-                log: (...args) => {
-                    if (DEBUG) {
-                        while (logBuffer.length > MAX_LOG_BUFFER) logBuffer.shift();
-                        logBuffer.push(...args);
-                    }
-                },
-                warn: (...args) => {
-                    if (DEBUG) {
-                        while (warnBuffer.length > MAX_LOG_BUFFER) warnBuffer.shift();
-                        warnBuffer.push(...args);
-                    }
-                },
+                log: (...args) => DEBUG && logBuffer.push(...args),
+                warn: (...args) => DEBUG && warnBuffer.push(...args),
                 flush: () => {
                     clearInterval(interval);
-                    logIndex = 0;
                     if (logBuffer.length) {
+                        let i = 0;
                         console.log('[AdBlock_WebDive]');
-                        logBuffer.splice(0).forEach(t => console.log(`${++logIndex}: ${t}\n`));
+                        logBuffer.splice(0).forEach(t => console.log(`${++i}: ${t}\n`));
                     }
-                    warnIndex = 0;
                     if (warnBuffer.length) {
+                        let i = 0;
                         console.warn('[AdBlock_WebDive]');
-                        warnBuffer.splice(0).forEach(t => console.warn(`${++warnIndex}: ${t}\n`));
+                        warnBuffer.splice(0).forEach(t => console.warn(`${++i}: ${t}\n`));
                     }
                 }
             };
@@ -120,10 +110,14 @@ if (!window.WebDiveAdBlockerInitialized) {
 
         const getElementSignature = el => {
             const tag = el.tagName.toLowerCase();
-            const id = el.id ? `#${CSS.escape(el.id)}` : '';
-            const cls = [...el.classList].slice(0, 3).map(c => `.${CSS.escape(c)}`).join('');
+            const id = el.id ? `#${CSS.escape(el.id)}` : ''; // Escape the id
+            const cls = [...el.classList]
+                .slice(0, 3) // Limit to the first 3 classes
+                .map(c => `.${CSS.escape(c)}`) // Escape each class
+                .join('');
             return `${tag}${id}${cls}`;
         };
+
 
         const removeElementAndAncestors = (el, depth = 5) => {
             if (!el || !(el instanceof Element)) return;
@@ -191,6 +185,7 @@ if (!window.WebDiveAdBlockerInitialized) {
             try {
                 const res = await fetch(url);
                 const text = await res.text();
+                // load id's and classes. 
                 const selectors = text.split('\n').map(s => s.trim())
                     .filter(s => s.startsWith("#") || s.startsWith(".")).filter(x => x.includes("ad")).map(s => s);
                 saveJSON(EASYLIST_KEY, selectors);
@@ -208,7 +203,7 @@ if (!window.WebDiveAdBlockerInitialized) {
             return [...easy, ...fallbackSelectors];
         };
 
-        // Limit DOM query to first 50 elements per selector
+        
         const cleanAds = (context, selectors) => {
             const removedSigs = new Set(loadJSON(SIGNATURES_KEY) || []);
 
@@ -226,11 +221,14 @@ if (!window.WebDiveAdBlockerInitialized) {
                 }
             };
 
+
             selectors.forEach(sel => {
-                if (!sel) return;
+
+                if (!sel) return; // Skip null or empty selectors
+
                 if (sanitizeSelector(sel)) {
                     safe(() => {
-                        [...context.querySelectorAll(sel)].slice(0, 50).forEach(el => {
+                        context.querySelectorAll(sel).forEach(el => {
                             const sig = getElementSignature(el);
                             removeElementAndAncestors(el);
                             removedSigs.add(sig);
@@ -244,11 +242,12 @@ if (!window.WebDiveAdBlockerInitialized) {
 
         const sanitizeSignaturesKey = () => {
             const lastSanitized = loadJSON(LAST_SANITIZED_KEY);
-            const today = new Date().toISOString().split('T')[0];
+            const today = new Date().toISOString().split('T')[0]; // Get current date in YYYY-MM-DD format
+
             if (lastSanitized !== today) {
                 DEBUG && Logger.log('Sanitizing SIGNATURES_KEY for a new visit today.');
-                localStorage.removeItem(SIGNATURES_KEY);
-                saveJSON(LAST_SANITIZED_KEY, today);
+                localStorage.removeItem(SIGNATURES_KEY); // Clear the signatures for the site
+                saveJSON(LAST_SANITIZED_KEY, today); // Update the last sanitized date
             } else {
                 DEBUG && Logger.log('SIGNATURES_KEY already sanitized today.');
             }
@@ -285,32 +284,39 @@ if (!window.WebDiveAdBlockerInitialized) {
         const cleanShadowDOMs = selectors => {
             findAllShadowHosts().forEach(host => {
                 const root = host.shadowRoot;
-                if (root) cleanAds(root, selectors);
+                if (!root) return;
+                cleanAds(root, selectors);
             });
         };
 
-        // Single observer per root, reuse via property
         const observeShadowRoots = selectors => {
             findAllShadowHosts().forEach(host => {
                 const root = host.shadowRoot;
                 if (!root) return;
-                if (!root._webDiveObserver) {
-                    root._webDiveObserver = new MutationObserver(() => cleanAds(root, selectors));
-                    root._webDiveObserver.observe(root, { childList: true, subtree: true });
-                    observers.add(root._webDiveObserver);
-                }
+                const obs = new MutationObserver(() => cleanAds(root, selectors));
+                obs.observe(root, { childList: true, subtree: true });
+                observers.add(obs);
             });
         };
 
         const cleanupObservers = () => {
             observers.forEach(o => o.disconnect());
             observers.clear();
-            // observedShadowRoots is a WeakSet, no need to clear
+            observedShadowRoots.clear();
         };
 
-        const run = async () => {
-            if (isCleanedUp) return;
+        const debounceVisibility = (() => {
+            let timer;
+            return (fn, delay = 200) => {
+                clearTimeout(timer);
+                timer = setTimeout(fn, delay);
+            };
+        })();
 
+        const run = async () => {
+            // if cleanup force exit-> although you can remove the object (script) from window -> destroys it. 
+            isCleanedUp = false; 
+            // Wait until document.body exists
             const waitForBody = () => new Promise(resolve => {
                 if (document.body) return resolve();
                 const observer = new MutationObserver(() => {
@@ -323,33 +329,38 @@ if (!window.WebDiveAdBlockerInitialized) {
             });
 
             await waitForBody();
-            sanitizeSignaturesKey();
-            fastCleanupFromCache();
+            sanitizeSignaturesKey(); // Sanitize the SIGNATURES_KEY for a new visit
+            fastCleanupFromCache();  // Cleanup with existing selectors per site on load . 
 
             const selectors = await getEasyListSelectors();
 
             const firstRun = () => new Promise(resolve => {
+
                 cleanAds(document, selectors);
                 cleanShadowDOMs(selectors);
                 DEBUG && Logger.log('Running initial page load scan with Easy List');
                 return resolve();
             });
 
+            // First run cleanup
             await firstRun();
 
-            debouncedCleanListener = debounce(() => {
+            // move to a more efficient way to observe the document with dynamic selectors
+            const debouncedClean = debounce(() => {
                 if (isCleanedUp) return;
                 cleanupObservers();
                 const removedSigs = new Set(loadJSON(SIGNATURES_KEY) || []);
                 const dynamicSelectors = [...removedSigs, ...fallbackSelectors];
+
                 cleanAds(document, dynamicSelectors);
                 cleanShadowDOMs(dynamicSelectors);
                 observeShadowRoots(dynamicSelectors);
             }, 400);
+           
 
-            throttledScrollListener = throttle(debouncedCleanListener, 200);
+            const throttledScroll = throttle(debouncedClean, 200);
 
-            const mo = new MutationObserver(debouncedCleanListener);
+            const mo = new MutationObserver(debouncedClean);
             mo.observe(document.body, {
                 childList: true,
                 subtree: true,
@@ -359,22 +370,36 @@ if (!window.WebDiveAdBlockerInitialized) {
             observers.add(mo);
 
             interval = setInterval(() => {
-                if (document.readyState === 'complete') debouncedCleanListener();
+                if (document.readyState === 'complete') debouncedClean();
             }, 2000);
 
-            window.addEventListener('scroll', throttledScrollListener, { passive: true });
-            window.addEventListener('popstate', debouncedCleanListener);
+            window.addEventListener('scroll', throttledScroll);
+            window.addEventListener('popstate', debouncedClean);
             window.addEventListener('beforeunload', cleanup);
 
-            debouncedCleanListener();
+            document.addEventListener('visibilitychange', () => {
+                debounceVisibility(() => {
+                    if (document.hidden && !window.WebDiveAdBlocker?.isCleanedUp) {
+                        window.WebDiveAdBlocker?.cleanup();
+                        console.log('AdBlocker cleaned up on page hide');
+                    } else if (!document.hidden && window.WebDiveAdBlocker?.isCleanedUp) {
+                        window.WebDiveAdBlocker?.run();
+                        console.log('AdBlocker re-initialized on page show');
+                    }
+                }, 250);
+            });
+
+            debouncedClean();
+
         };
+
 
         const cleanup = () => {
             isCleanedUp = true;
             cleanupObservers();
             if (interval) clearInterval(interval);
-            if (throttledScrollListener) window.removeEventListener('scroll', throttledScrollListener, { passive: true });
-            if (debouncedCleanListener) window.removeEventListener('popstate', debouncedCleanListener);
+            window.removeEventListener('scroll', run);
+            window.removeEventListener('popstate', run);
             window.removeEventListener('beforeunload', cleanup);
             Logger.warn('AdBlocker cleanup complete');
             Logger.flush();
@@ -382,15 +407,11 @@ if (!window.WebDiveAdBlockerInitialized) {
 
         return {
             run,
-            cleanup
+            cleanup,
+            get isCleanedUp() { return isCleanedUp; }
         };
-
+        
     })();
 
-    // Initialize when document is ready
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => window.WebDiveAdBlocker.run());
-    } else {
-        window.WebDiveAdBlocker.run();
-    }
 }
+// Initialize the ad blocker when the document is ready John M. Doyle 2025-5-01
