@@ -37,7 +37,7 @@
 
 ## 📥 Download
 
-You can explore or download Web Dive directly from the [Microsoft Store](https://apps.microsoft.com/).
+You can explore or download Web Dive directly from the [Microsoft Store](https://apps.microsoft.com/detail/9N110TCFKBLT?hl=en-us&gl=US&ocid=pdpshare).
 
 ---
 
